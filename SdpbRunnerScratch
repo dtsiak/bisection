@@ -1,0 +1,101 @@
+#!/bin/bash
+#SBATCH --partition=parallel
+#SBATCH --output=TEST3.out
+#SBATCH --error=TEST3.err
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --mem=10GB
+
+
+
+
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+echo $SLURM_NTASKS_PER_NODE
+
+#module load cmake/3.10.2
+module load mpi/ofed/openmpi-1.8.8-gcc5
+module load python/3.6.4
+module load gcc/9.3.0
+dphi=$1
+D0=$2
+dimY=1.1
+D0old=${D0}
+
+
+mv /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0} /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}_new
+mkdir /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}
+
+find /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}_new -name "*.xml" -print0 > /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}_new/xml_list.nsv
+
+
+
+#$HOME/SDPB2_2_0/sdpb/build/pvm2sdp 660 /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}_new/xml_list.nsv /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}
+#HOT STARTING
+mkdir  /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/build/bin/Cubic_phi-S_mixed_Y_grid-dext${dphi}-dS${D0}-Dmin${dimY}.ck
+cp /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/checkpoints/*  /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/build/bin/Cubic_phi-S_mixed_Y_grid-dext${dphi}-dS${D0}-Dmin${dimY}.ck/
+
+
+mpirun  $HOME/sdpb/sdpb/sdpb/build/sdpb -o /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}/xml_ck_out_${dphi}_${D0}.out --noFinalCheckpoint --maxRuntime=999986400 --precision=1000  --detectPrimalFeasibleJump --findDualFeasible  --dualErrorThreshold=1e-15 --procsPerNode=4 -s /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/build/bin/Cubic_phi-S_mixed_Y_grid-dext${dphi}-dS${D0}-Dmin${dimY}
+
+
+echo ${dphi}_${D0} >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/OUTPUTS/output_${dphi}
+head -1 /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}/xml_ck_out_${dphi}_${D0}.out/out.txt >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/OUTPUTS/output_${dphi}
+
+string="$(head -1 /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0}/xml_ck_out_${dphi}_${D0}.out/out.txt)"
+string2='terminateReason = "found dual feasible solution";'
+
+
+if [ 'terminateReason = "found primal-dual optimal solution";'  == "$(echo $string)"  ]; then echo {${dphi} , ${D0}}, >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/OUTPUTS/output_${dphi}_Not_Allowed ;fi
+if [ 'terminateReason = "found dual feasible solution";'  == "$(echo $string)"  ]; then echo {${dphi} , ${D0}}, >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/OUTPUTS/output_${dphi}_Not_Allowed ;fi
+if [ 'terminateReason = "primal feasible jump detected";'  == "$(echo $string)"  ]; then echo {${dphi} , ${D0}}, >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/OUTPUTS/output_${dphi}_Allowed ;fi
+
+
+if [ 'terminateReason = "found primal-dual optimal solution";'  == "$(echo $string)"  ]; then echo  $D0 >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/Upper_${dphi} ;fi
+if [ 'terminateReason = "found dual feasible solution";'  == "$(echo $string)"  ]; then echo  $D0 >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/Upper_${dphi} ;fi
+if [ 'terminateReason = "primal feasible jump detected";'  == "$(echo $string)"  ]; then echo $D0 >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/Lower_${dphi} ;fi
+
+
+lower=$( tail -n 1 $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/Lower_${dphi} )
+upper=$( tail -n 1 $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/Upper_${dphi} )
+
+echo "scale=15; $upper - $lower" | bc >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/Diff_${dphi}
+diff=$( tail -n 1 $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/Diff_${dphi} )
+#diff=(python -c "print $diff")
+#I changed the above
+
+
+
+
+
+if [ 0$diff \< 0.000001 ];
+then 
+ echo "Bisection Completed" >> $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/CurrentPoint_${dphi};
+else
+ echo "scale=15; $upper/5 + $upper/5 + $lower/5 + $lower/5 + $lower/5" | bc >>  $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/CurrentPoint_${dphi};
+fi; 
+
+D0=$( tail -n 1 $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/Documentation/CurrentPoint_${dphi} )
+#mv $HOME/workdir/workdir2/ParallelBisectionDir/xml_and_ck_${dphi}/xml_and_ck_${dphi}_${D0old}.ck $HOME/workdir/workdir2/ParallelBisectionDir/xml_and_ck_${dphi}/xml_and_ck_${dphi}_${D0}.ck
+rm -r /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0old}.ck
+
+
+if [ 0$diff \> 0.000001 ];
+then 
+  D01=$(python -c "print $D0")
+  mkdir /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D01}
+  sbatch -e  $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/SLURM_Grid_OUTS/${dphi}_${D01}.err -o  $HOME/workdir/workdir2/PARALLEL_XML_BISECTION_AUTO/SLURM_Grid_OUTS/out${dphi}_${D01}.out /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/sbatchgrid.sh ${dphi} ${D01};
+fi;
+
+
+#rm -r /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0old}*
+#rm -r /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0old}
+#rm -r /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0old}_new
+#rm /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0old}.xml
+#rm -r /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0old}.ck
+#rm /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/xml_ck_out_${dphi}/xml_ck_out_${dphi}_${D0old}.ck.bk
+
+mkdir /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/checkpoints
+mv /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/build/bin/Cubic_phi-S_mixed_Y_grid-dext${dphi}-dS${D0}-Dmin${dimY}.ck/* /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/checkpoints/
+rm -r /scratch/dtsiakoulias/bisection_auto/xml_ck_out_${dphi}/build/bin/Cubic_phi-S_mixed_Y_grid-dext${dphi}-dS${D0}-Dmin${dimY}
+
